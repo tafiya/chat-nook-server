@@ -4,6 +4,7 @@ const app =express();
 require('dotenv').config()
 const cors =require('cors');
 var jwt = require('jsonwebtoken');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const port =process.env.PORT || 5300;
 
 //middleware
@@ -32,6 +33,7 @@ async function run() {
     const postCollection = client.db("chatNookCollection").collection("allPosts");
     const announcementCollection =client.db("chatNookCollection").collection("announcements");
     const commentCollection =client.db("chatNookCollection").collection("comment");
+    const paymentCollection = client.db("chatNookCollection").collection("payments");
  
          // jwt related api
          app.post('/jwt', async (req, res) => {
@@ -70,11 +72,20 @@ const verifyAdmin = async (req, res, next) => {
 
  
     //users related api
-    app.get('/users',verifyToken,verifyAdmin,  async (req, res) => {
+    app.get('/users', verifyToken,verifyAdmin,  async (req, res) => {
         const result = await userCollection.find().toArray();
         res.send(result);
       });
       
+      app.get('/users/:email', async (req, res) => {
+        const query = { email: req.params.email }
+        // if (req.params.email !== req.decoded.email) {
+        //   return res.status(403).send({ message: 'forbidden access' });
+        // }
+        const result = await userCollection.find(query).toArray();
+        res.send(result);
+      })
+
       app.get('/users/admin/:email', verifyToken, async (req, res) => {
         const email = req.params.email;
         if (email !== req.decoded.email) {
@@ -114,6 +125,18 @@ const verifyAdmin = async (req, res, next) => {
         const result = await userCollection.updateOne(filter, updatedDoc);
         res.send(result);
       })
+      app.patch('/users/payments/:id', async (req, res) => {
+        const id = req.params.id;
+        console.log('i want to update',id)
+        const newFilter = { '_id': new ObjectId(id) };
+        const updatedDoc = {
+          $set: {
+            status: 'member'
+          }
+        }
+        const result = await userCollection.updateOne(newFilter, updatedDoc);
+        res.send(result);
+      })
       app.delete('/users/:id',verifyToken,verifyAdmin,  async (req, res) => {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) }
@@ -127,12 +150,27 @@ const verifyAdmin = async (req, res, next) => {
         const result= await postCollection.find().toArray(); 
         res.send(result);
     })
+    app.get('/posts/:email', verifyToken, async (req, res) => {
+      const query = { email: req.params.email }
+      if (req.params.email !== req.decoded.email) {
+        return res.status(403).send({ message: 'forbidden access' });
+      }
+      const result = await postCollection.find(query).toArray();
+      res.send(result);
+    })
 
     app.post('/posts', async (req, res) => {
         const item = req.body;
         const result = await postCollection.insertOne(item);
+        console.log(result)
         res.send(result);
       });
+      app.delete('/posts/:id',verifyToken,  async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) }
+        const result = await postCollection.deleteOne(query);
+        res.send(result);
+      })
        //announcement related api
     app.get('/announcements',async(req,res)=>{
  
@@ -158,6 +196,40 @@ const verifyAdmin = async (req, res, next) => {
         const result = await commentCollection.insertOne(item);
         res.send(result);
       });
+
+      app.post('/create-payment-intent', async (req, res) => {
+        const { price } = req.body;
+        const amount = parseInt(price * 100);
+        console.log(amount, 'amount inside the intent')
+  
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: 'usd',
+          payment_method_types: ['card']
+        });
+        console.log(paymentIntent)
+  
+        res.send({
+          clientSecret: paymentIntent.client_secret
+        })
+      }); 
+
+      app.get('/payments/:email', verifyToken, async (req, res) => {
+        const query = { email: req.params.email }
+        if (req.params.email !== req.decoded.email) {
+          return res.status(403).send({ message: 'forbidden access' });
+        }
+        const result = await paymentCollection.find(query).toArray();
+        res.send(result);
+      })
+  
+      app.post('/payments', async (req, res) => {
+        const payment = req.body;
+        const paymentResult = await paymentCollection.insertOne(payment);
+        console.log('payment info', payment);
+        res.send({ paymentResult });
+      })
+   
     
     // Send a ping to confirm a successful connection
     // await client.db("admin").command({ ping: 1 });
